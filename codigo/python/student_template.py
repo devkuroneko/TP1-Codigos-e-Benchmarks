@@ -12,24 +12,32 @@ from typing import Any, List, Tuple
 import unittest
 import random
 
-'''
-
-função para criar valores aleatórios dinamicamente para não depender de valores fixos
-
-params:
-    vector_size:int -> define o tamanho do vetor a ser usado
-    min_random_values_range:int -> define o valor minimo dos valores aleatórios
-    max_random_values_range:int -> define o valor máximo dos valores aleatórios
-
-return:
-    devolve uma lista com os valores aleatórios para ordenação
-    
-'''
+# CLAUDE: [gerador aleatório PRÓPRIO do módulo, separado do 'random' global]
+# [o benchmark.py chama random.seed(42) e usa o stream global para gerar os datasets; se a
+# ordenação sorteasse pivôs desse mesmo stream, cada chamada deslocaria a sequência e os
+# datasets dos blocos seguintes mudariam, quebrando a reprodutibilidade da comparação entre
+# algoritmos. Com instância própria e semente fixa os dois streams ficam isolados e as
+# execuções do algoritmo continuam determinísticas de uma rodada para outra]
+SEMENTE_PIVOT = 42
+sorteador_pivot = random.Random(SEMENTE_PIVOT)
 
 
 def random_number_generation(vector_size: int, min_random_values_range: int, max_random_values_range: int) -> List[int]:
-    # checagem simples de tipagem
+    '''
 
+    função para criar valores aleatórios dinamicamente para não depender de valores fixos
+
+    params:
+        vector_size:int -> define o tamanho do vetor a ser usado
+        min_random_values_range:int -> define o valor minimo dos valores aleatórios
+        max_random_values_range:int -> define o valor máximo dos valores aleatórios
+
+    return:
+        devolve uma lista com os valores aleatórios para ordenação
+
+    '''
+
+    # checagem simples de tipagem
     # caso não seja float e nem inteiro, o usuário é notificado e encerra a função
     if not isinstance(vector_size, int) and not isinstance(vector_size, float):
         print('valor inserido não é inteiro. Encerrando o loop de criação de dados')
@@ -61,85 +69,136 @@ def random_number_generation(vector_size: int, min_random_values_range: int, max
 """
 
 '''
-esta função tem como objetivo percorrer o vetor original e identificar o valor máximo para realizar
-a ordenação
+esta função particiona o vetor em torno de um pivô (o elemento da posição [-1]) e se chama
+recursivamente até que tudo esteja ordenado.
 
 param:
-    recebe o vetor gerado pela função "random_number_generation"
+    recebe o vetor gerado pela função "random_number_generation" (ou qualquer sublista vinda da recursão)
 
 return
-    retorna o valor máximo do vetor para ser utilizado pela função "my_authorial_sort"
+    retorna a tupla (lista_ordenada, comparacoes, movimentacoes) para ser utilizada pela
+    função "my_authorial_sort"
 '''
 
+'''
+escolhe dinamicamente o valor que servirá de pivô (mediador) para uma partição
 
-def find_max_value(array_generated: List[Any]):
+param:
+    recebe o vetor (ou sublista) que está prestes a ser particionado
+
+return
+    retorna a tupla (valor_do_pivot, comparacoes_gastas_na_escolha)
+'''
+
+def escolher_pivot(vector_base: List[Any]) -> Tuple[Any, int]:
+    # vetores com menos de 3 elementos mantêm o pivô em [-1]
+    if len(vector_base) < 3:
+        return vector_base[-1], 0
+
+    primeira_posicao = sorteador_pivot.randrange(len(vector_base))
+    segunda_posicao = sorteador_pivot.randrange(len(vector_base))
+    terceira_posicao = sorteador_pivot.randrange(len(vector_base))
+
+    candidatos = [
+        vector_base[primeira_posicao],
+        vector_base[segunda_posicao],
+        vector_base[terceira_posicao],
+    ]
+
+    candidatos.sort()
+
+    return candidatos[1], 3
+
+
+
+def find_max_value(array_generated: List[Any]) -> Tuple[List[Any], int, int]:
     vector_base = list(array_generated)
-    lenght_vector = len(vector_base)
-    last_index_value = vector_base[-1]
-    vetor_menor_que_mediador = []
-    vetor_maior_que_mediador = []
-    vetor_igual_mediador = []
-    ultimo_valor_adicionado_vetor_maior= 0
-    ultimo_valor_adicionado_vetor_menor = 0
+
+    comparison = 0
+    steps = 0
+
+    # vetor_maior_final tudo que é maior; a invariante mantida do começo ao fim é
+    # vetor_menor_final <= vector_base <= vetor_maior_final, então a concatenação final sai ordenada
+    vetor_menor_final = []
+    vetor_maior_final = []
+
+    # CLAUDE: [a guarda de tamanho ficava DEPOIS de vector_base[-1], estourando IndexError em lista vazia]
+    # [virou a condição do while: um vetor vazio ou de 1 elemento já está ordenado por definição, então
+    # o laço nem começa e o caso base encerra o processamento — antes o único elemento era perdido]
+    while len(vector_base) > 1:
+
+        # o pivô é usado apenas como VALOR de comparação, não precisa estar em posição nenhuma do vetor
+        valor_pivot, comparison_escolha_pivot = escolher_pivot(vector_base)
+        comparison += comparison_escolha_pivot
+
+        vetor_menor_que_mediador = []
+        vetor_maior_que_mediador = []
+        vetor_igual_mediador = []
+
+        # =========================================================================
+        # loop de particionamento: cada valor vai para exatamente um dos três vetores
+        for valor_atual in vector_base:
+
+            # aqui é len(menor) + len(igual) + len(maior) == len(entrada)
+            comparison += 1
+            if valor_atual < valor_pivot:
+                vetor_menor_que_mediador.append(valor_atual)
+
+            elif valor_atual > valor_pivot:
+                comparison += 1
+                vetor_maior_que_mediador.append(valor_atual)
+
+            else:
+                # modo easy, só adiciona pois são valores iguais ao pivô
+                comparison += 1
+                vetor_igual_mediador.append(valor_atual)
+
+            steps += 1
+
+        # =========================================================================
+
+
+        # CLAUDE: [só o MENOR dos dois vetores desce por recursão; o maior continua no while]
+        # [com o pivô fixo na posição [-1], um vetor já ordenado ou invertido joga todos os elementos
+        # para um lado só e a recursão pura chegava a N níveis — o benchmark.py usa N=1000 com as
+        # distribuições 'sorted' e 'reverse' e estourava RecursionError.
+        if len(vetor_menor_que_mediador) <= len(vetor_maior_que_mediador):
+            menor_ordenado, comparison_recursao, steps_recursao = find_max_value(vetor_menor_que_mediador)
+
+            # os menores já ordenados e os iguais ao pivô ficam definitivamente à esquerda
+            vetor_menor_final = vetor_menor_final + menor_ordenado + vetor_igual_mediador
+            steps += len(menor_ordenado) + len(vetor_igual_mediador)
+
+            # sobra o vetor dos maiores para ser particionado na próxima volta do while
+            vector_base = vetor_maior_que_mediador
+
+        else:
+            maior_ordenado, comparison_recursao, steps_recursao = find_max_value(vetor_maior_que_mediador)
+
+            # os iguais ao pivô e os maiores já ordenados ficam definitivamente à direita
+            vetor_maior_final = vetor_igual_mediador + maior_ordenado + vetor_maior_final
+            steps += len(maior_ordenado) + len(vetor_igual_mediador)
+
+            # sobra o vetor dos menores para ser particionado na próxima volta do while
+            vector_base = vetor_menor_que_mediador
+
+        comparison += comparison_recursao
+        steps += steps_recursao
+
     # =========================================================================
-    # loop inicial para percorrer para identificar o maior valor do vetor, caso seja maior que 1_000_000 será usado uma
-    # constante para minimizar re atribuições para dados muito longos
+    # algoritmo: pela invariante mantida no while, tudo à esquerda é menor e tudo à direita é maior
+    # que o que sobrou em vector_base (0 ou 1 elemento), então a junção já está ordenada]
+    vetor_ordenado = vetor_menor_final + vector_base + vetor_maior_final
+    steps += len(vetor_ordenado)
 
-    if lenght_vector >= 2:
-        print(f'valor definido como mediador: {last_index_value}: {vector_base.index(last_index_value)} -- vetor OG: {vector_base}')
-        for values_to_compare in range(0, lenght_vector):
-
-            # o valor [-1] é maior que o valor que estou comparando?
-            if last_index_value > values_to_compare:
-
-                if values_to_compare > ultimo_valor_adicionado_vetor_menor:
-                    ultimo_valor_adicionado_vetor_menor = values_to_compare  # atualizo somente o ultimo valor máximo
-                    vetor_menor_que_mediador.append(vector_base[values_to_compare])
-
-
-                elif values_to_compare < ultimo_valor_adicionado_vetor_menor:
-                    for index_values_vetor_menor in vetor_menor_que_mediador:
-                        if values_to_compare > index_values_vetor_menor:
-                            index_add = vetor_menor_que_mediador.index(index_values_vetor_menor)
-                            vetor_menor_que_mediador.insert(index_add, values_to_compare)
-
-    # ==================================================================================================
-            # modo easy, só adiciona pois são valores iguais
-            elif last_index_value == values_to_compare:
-                vetor_igual_mediador.append(vector_base[values_to_compare])
-
-    # ==================================================================================================
-
-            # o valor [-1] é menor que o valor que estou comparando?
-            elif values_to_compare > last_index_value:
-
-                if values_to_compare > ultimo_valor_adicionado_vetor_maior:
-                    ultimo_valor_adicionado_vetor_maior = values_to_compare  # atualizo somente o ultimo valor máximo
-                    vetor_maior_que_mediador.append(vector_base[values_to_compare])
-
-
-                elif values_to_compare < ultimo_valor_adicionado_vetor_maior:
-                    for index_values_vetor_maior in vetor_maior_que_mediador:
-                        if values_to_compare > index_values_vetor_maior:
-                            index_add = vetor_maior_que_mediador.index(index_values_vetor_maior)
-                            vetor_maior_que_mediador.insert(index_add, values_to_compare)
-
-
-    return f'vetor menor:{vetor_menor_que_mediador}\n\nvetor igual{vetor_igual_mediador}\n\nvetor maior{vetor_maior_que_mediador}\n\n'
+    return vetor_ordenado, comparison, steps
 
 
 def my_authorial_sort(arr: List[Any]) -> Tuple[List[Any], int, int]:
-    vector_base = list(arr)
-    lenght_vector = len(vector_base)
-    comparison = 0
-    steps = 0
-    # usar dicionário?
-    score_vector = []
-    # =========================================================================
-    # TODO: Escreva sua lógica autoral aqui.
-    # Exemplo temporário (substitua pelo seu algoritmo):
-
-    # =========================================================================
+    # CLAUDE: [a função era um esboço que devolvia a entrada intacta com comparison = steps = 0]
+    # [agora delega para find_max_value, que é o algoritmo de fato, e apenas repassa a tupla no
+    # contrato exigido pelo enunciado: (lista_ordenada, total_comparacoes, total_movimentacoes)]
+    vector_base, comparison, steps = find_max_value(arr)
 
     return vector_base, comparison, steps
 
@@ -185,6 +244,11 @@ class TestStudentAuthorialSort(unittest.TestCase):
 
 if __name__ == "__main__":
     print("🧪 Executando testes unitários no seu algoritmo autoral...")
-    # unittest.main(verbosity=2)
-    # my_authorial_sort(random_number_generation(10, 25, 75))
-    print(find_max_value(random_number_generation(10, 25, 125)))
+
+    vetor_demonstracao = random_number_generation(100, 25, 125)
+    print(f'vetor original: {vetor_demonstracao}')
+    print(f'valor definido como pivô (posição [-1]): {vetor_demonstracao[-1]}')
+    resultado, total_comparacoes, total_movimentacoes = my_authorial_sort(vetor_demonstracao)
+    print(f'vetor ordenado: {resultado}')
+    print(f'comparações: {total_comparacoes} | movimentações: {total_movimentacoes}\n')
+    unittest.main(verbosity=2)
