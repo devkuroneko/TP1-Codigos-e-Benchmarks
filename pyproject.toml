@@ -1,0 +1,9 @@
+[project]
+name = "tp1-codigos-e-benchmarks"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.3",
+    "scipy>=1.18.1",
+]
